@@ -1,0 +1,130 @@
+\documentclass[11pt]{article}
+
+% Variable for HW number & name:
+\newcommand{\class}{Stats 305c}
+\newcommand{\hwnum}{1}
+\newcommand{\quarter}{Spring 2026}
+
+% Packages
+\usepackage[margin=1in]{geometry}             
+\geometry{letterpaper}                  
+\usepackage{graphicx}
+\usepackage{physics}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{hyperref, multicol}
+\hypersetup{colorlinks=false, allcolors=blue}
+\usepackage[shortlabels]{enumitem}
+\usepackage{bbm}
+\usepackage{float}
+
+% Commands for distributions
+\newcommand{\Bern}{\mathrm{Bern}}
+\newcommand{\Bin}{\mathrm{Bin}}
+\newcommand{\HGeom}{\mathrm{HGeom}}
+\newcommand{\Geom}{\mathrm{Geom}}
+\newcommand{\FS}{\mathrm{FS}}
+\newcommand{\Pois}{\mathrm{Pois}}
+\newcommand{\Unif}{\mathrm{Unif}}
+\newcommand{\Expo}{\mathrm{Expo}}
+\newcommand{\Beta}{\mathrm{Beta}}
+\newcommand{\Gam}{\mathrm{Gamma}}
+\newcommand{\Logistic}{\mathrm{Logistic}}
+\newcommand{\Nml}{\mathcal{N}}
+\newcommand{\Lyap}{\mathrm{Lyap}}
+\newcommand{\Lind}{\mathrm{Lind}}
+\newcommand{\Rademacher}{\mathrm{Rademacher}}
+
+% Commands for Var, Cov, Cor, etc.
+\newcommand{\E}{\mathbb{E}}
+\renewcommand{\P}{\mathbb{P}}
+\newcommand{\Hcal}{\mathcal{H}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\Cor}{\mathrm{Cor}}
+\newcommand{\indi}{\mathbbm{1}}
+
+% Commands for convergence
+\newcommand{\toprob}{\xrightarrow{P}}
+\newcommand{\todist}{\xrightarrow{D}}
+\newcommand{\toas}{\xrightarrow{a.s.}}
+\newcommand{\tolaw}{\xrightarrow{\mathcal{L}}}
+
+% Commands for mathbb
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\C}{\mathbb{C}}
+
+% Setup for tcolorbox
+\usepackage[most]{tcolorbox}
+\tcbset{colback=green!5, colframe=green!75!black}
+
+% Paragraph settings
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1.25ex}
+
+% Solution environment
+\newenvironment{sol}
+    {\begin{tcolorbox}[breakable, pad at break*=1mm, parbox=false]
+    }
+    {
+    \end{tcolorbox}
+    }
+    
+% Page headers
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\lhead{Kenny Gu}
+\rhead{\class, Milestone \hwnum}
+
+\newcommand{\noin}{\noindent}
+
+% Indep symbol
+\DeclareSymbolFont{symbolsC}{U}{txsyc}{m}{n}
+\DeclareMathSymbol{\indep}{\mathrel}{symbolsC}{121}
+
+% Document info
+\title{\class\ Milestone \hwnum}
+\author{Kenny Gu}
+\date{April 2026}
+                        
+\begin{document}
+
+%\maketitle
+%\thispagestyle{empty}
+%\newpage
+ 
+% \noindent {\large  \textbf{\class\ Milestone \hwnum, \quarter}}
+
+% \medskip
+
+\newcommand{\KL}{\text{KL}}
+\newcommand{\pse}{\tilde{E}}
+\newcommand{\Et}{\tilde{E}}
+\newcommand{\bm}[1]{\mathbf{#1}}
+\renewcommand{\d}{\mathrm{d}}
+
+\textbf{Scientific or applied question.} I'm interested in using publicly available information to predict where (geographic regions or specific individuals) political contributions come from. It's impossible to ignore the impact of money in public elections: between Jan.\ 1 2023 and Dec.\ 31, 2024, congressional candidates reported over \$3.8 billion in receipts \cite{fec2024}. While many of these receipts are certainly comprised of contributions from traditional PACs and other non-individuals, political campaigns still make large efforts to fundraise from individual donors, as evidenced by the ubiquitous onslaught of fundraising emails, texts, and phone calls as election seasons draw near \cite{miller2022_smallruin,wong2026_fundraisingemail}. The large efforts and effects of campaign finance motivate researchers, news editors, and campaign strategists alike to ask a central question: where does (and can) the money come from?
+
+\textbf{Data source.} While researchers and campaign strategists often conduct their analyses based on proprietary data, there is still a trove of data available to the public: in particular, campaigns are required to report identifying information about individuals who donate more than \$200 during a campaign cycle \cite{fec2026_individualcontributionsreq}. Various sites (e.g., ProPublica) repackage this data, but this data is available in its most granular form through the FEC, where the (1) name, (2) occupation or employer, (3) city, (4) state, (5) date of transaction, (6) amount of contribution, and (7) name of committee disclosing the contribution are listed for each reported contribution \cite{fec2026_individualcontributions}. While the number of covariates is small, the data available stretches back to the 1970s, and there are, e.g., over 2.9 million reported contributions for Senate campaigns in the period from Jan.\ 1, 2025 to Apr.\ 5, 2026 alone. There are various APIs for querying the data, and there is also a tool for downloading bulk \texttt{.csv} files.
+
+However, the data is imperfect. There are often typos in names, which themselves may appear in several forms (e.g., nicknames and middle names). Occupations and employers may change over time, as will the locations of individuals. Additionally, contributions under \$200 do not need to be reported, leading to a significant missing data issue for smaller donations, especially since individuals may intentionally donate below the reporting limit.
+
+\textbf{Statistical framing and related work.} One simpler approach to modeling campaign contributions comes from \cite{cg2007_prospecting}, which uses proprietary campaign finance data from Rick Perry's 2006 gubernatorial election. \cite{cg2007_prospecting} models contributions as a random surface $Z$ with mean $\E[Z(s)] = \mu$ for all $s \in \R^2$ and $\Var(Z(s_i) - Z(s_j)) = 2 \gamma(s_i - s_j)$ for a function $\gamma : \R^2 \to \R_{\geq 0}$. Then, the observed contributions are $Z(s_1), \dots, Z(s_n)$ from individuals in locations $s_1, \dots, s_n$. 
+
+\cite{bg2022_appliedgeospatial} takes a more sophisticated and Bayesian approach to a similar problem, using proprietary data from a consulting firm on campaign contributions from 19+ million Californian voters. Importantly, they incorporate covariates through a Gaussian process model and thus model contributions as $Z(s) \sim \Nml(X(s) \beta, \sigma^2 H(\phi, s) + \tau^2 I)$ for covariates $X(s_1), \dots, X(s_n)$ and a kernel $H(\phi) = \{\exp(-\phi^2 \cdot \|s_i - s_j\|_2^2)\}_{i,j}$. After further placing priors on $\beta$, $\tau^2$, $\sigma^2$, and $\phi$, \cite{bg2022_appliedgeospatial} introduces a computational method for efficiently conducting posterior inference on the model.
+
+In \cite{cg2007_prospecting, bg2022_appliedgeospatial}, the researchers have access to specific location data and uncensored contribution data. Public data from the FEC is far more limited: e.g., our location data is much, much coarser. To incorporate geospatial effects, I might either try (a) city/state fixed/random effects or (b) directly adapting the Gaussian process model from \cite{bg2022_appliedgeospatial}, applied to the centroids of each city. We can also directly model the censoring by assuming that we observe $Z \mid Z > 200$. 
+
+We might also want to incorporate information on repeat donors by adding donor fixed/random effects, though this can quickly become extremely computationally difficult. Finally, we  might model temporal effects through autocorrelated random effects to account for inflation and spikes around election years. Adding appropriate priors to each effect allows us to use Bayesian computational tools to perform posterior inference and to check for robustness/appropriateness of our model.
+
+
+\newpage
+\textbf{AI disclosure.} I used ChatGPT to help convert links to BibTeX citation, though I checked each produced citation carefully for ensure their accuracy.
+
+\bibliographystyle{plain} 
+\bibliography{milestone1}
+
+\end{document}
