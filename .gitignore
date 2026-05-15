@@ -1,2 +1,5 @@
 data/
-milestone2/analysis/figures/
+milestone2/analysis/figures/.DS_Store
+milestone3/results_bootstrap.pkl
+milestone3/trace_norcal.pkl
+variogram_usa.png
