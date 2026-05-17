@@ -3,3 +3,14 @@ milestone2/analysis/figures/.DS_Store
 milestone3/results_bootstrap.pkl
 milestone3/trace_norcal.pkl
 variogram_usa.png
+*.aux
+*.bib
+*.fls
+*.fdb_latexmk
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.gz
+*.zip
+*.tar

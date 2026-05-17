@@ -1,0 +1,111 @@
+\documentclass[11pt]{article}
+
+% Variable for HW number & name:
+\newcommand{\class}{Stats 305c}
+\newcommand{\hwnum}{4}
+\newcommand{\quarter}{Spring 2026}
+
+% Packages
+\usepackage[margin=1in]{geometry}             
+\geometry{letterpaper}                  
+\usepackage{graphicx}
+\usepackage{physics}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{hyperref, multicol}
+\hypersetup{colorlinks=false, allcolors=blue}
+\usepackage[shortlabels]{enumitem}
+\usepackage{bbm}
+\usepackage{float}
+
+% Commands for distributions
+\newcommand{\Bern}{\mathrm{Bern}}
+\newcommand{\Bin}{\mathrm{Bin}}
+\newcommand{\HGeom}{\mathrm{HGeom}}
+\newcommand{\Geom}{\mathrm{Geom}}
+\newcommand{\FS}{\mathrm{FS}}
+\newcommand{\Pois}{\mathrm{Pois}}
+\newcommand{\Unif}{\mathrm{Unif}}
+\newcommand{\Expo}{\mathrm{Expo}}
+\newcommand{\Beta}{\mathrm{Beta}}
+\newcommand{\Gam}{\mathrm{Gamma}}
+\newcommand{\Logistic}{\mathrm{Logistic}}
+\newcommand{\Nml}{\mathcal{N}}
+\newcommand{\Lyap}{\mathrm{Lyap}}
+\newcommand{\Lind}{\mathrm{Lind}}
+\newcommand{\Rademacher}{\mathrm{Rademacher}}
+
+% Commands for Var, Cov, Cor, etc.
+\newcommand{\E}{\mathbb{E}}
+\renewcommand{\P}{\mathbb{P}}
+\newcommand{\Hcal}{\mathcal{H}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\Cor}{\mathrm{Cor}}
+\newcommand{\indi}{\mathbbm{1}}
+
+% Commands for convergence
+\newcommand{\toprob}{\xrightarrow{P}}
+\newcommand{\todist}{\xrightarrow{D}}
+\newcommand{\toas}{\xrightarrow{a.s.}}
+\newcommand{\tolaw}{\xrightarrow{\mathcal{L}}}
+
+% Commands for mathbb
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\C}{\mathbb{C}}
+
+% Setup for tcolorbox
+\usepackage[most]{tcolorbox}
+\tcbset{colback=green!5, colframe=green!75!black}
+
+% Paragraph settings
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1.25ex}
+
+% Solution environment
+\newenvironment{sol}
+    {\begin{tcolorbox}[breakable, pad at break*=1mm, parbox=false]
+    }
+    {
+    \end{tcolorbox}
+    }
+    
+% Page headers
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\lhead{Kenny Gu and Scott Hwang}
+\rhead{\class, Milestone \hwnum}
+
+\newcommand{\noin}{\noindent}
+
+% Indep symbol
+\DeclareSymbolFont{symbolsC}{U}{txsyc}{m}{n}
+\DeclareMathSymbol{\indep}{\mathrel}{symbolsC}{121}
+
+% Document info
+\title{\class\ Milestone \hwnum}
+\author{Kenny Gu}
+\date{April 2026}
+                        
+\begin{document}
+
+This week, we continued refining our model. We begin by recalling that, in our last milestone, most of our geospatial models for predicting campaign contributions per zip code did not perform well on test data, relative to baseline null models (e.g., OLS or simply the train mean). On the other hand, when we shifted to predicting the difference in log campaign contributions per zip code (between the 2020 and 2022 cycles), we saw moderate improvements in test accuracy. However, we note that the improvements were still far less than ideal (e.g., test MSE of 3.30 vs. 3.24 for the train mean model vs our geospatial Bayesian model). Additionally, one can easily see that the posterior predictive samples do not seem to match particularly well:
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\linewidth]{../posterior_check_milestone3/posterior_predictive_check.png}
+\end{figure}
+
+In particular, we see that there appears to be an additional mode around 5 that is not matched in our posterior predictive distribution. On the left-most plot, we plot these zip codes that roughly correspond to this model: it doesn't seem like there is a clear spatial component (which rules out factors like state-level differences). In an attempt to account for this mode and to improve our overall model performance, we instead fit models that include other covariates. Additionally, rather than trying to predict the difference, we reframe our problem by using (log) contributions in 2020 as a covariate, rather than as part of our outcome.
+
+\newpage
+\textbf{AI disclosure.} We used ChatGPT to help us...
+
+\textbf{GitHub repository.} \href{https://github.com/kennethgu/stats305c-project/}{https://github.com/kennethgu/stats305c-project/}
+
+% \bibliographystyle{plain} 
+% \bibliography{milestone1}
+
+\end{document}
