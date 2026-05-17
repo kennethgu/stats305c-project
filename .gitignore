@@ -14,3 +14,4 @@ variogram_usa.png
 *.gz
 *.zip
 *.tar.DS_Store
+*.nc
