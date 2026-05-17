@@ -98,7 +98,19 @@ This week, we continued refining our model. We begin by recalling that, in our l
     \includegraphics[width=0.8\linewidth]{../posterior_check_milestone3/posterior_predictive_check.png}
 \end{figure}
 
-In particular, we see that there appears to be an additional mode around 5 that is not matched in our posterior predictive distribution. On the left-most plot, we plot these zip codes that roughly correspond to this model: it doesn't seem like there is a clear spatial component (which rules out factors like state-level differences). In an attempt to account for this mode and to improve our overall model performance, we instead fit models that include other covariates. Additionally, rather than trying to predict the difference, we reframe our problem by using (log) contributions in 2020 as a covariate, rather than as part of our outcome.
+In particular, we see that there appears to be an additional mode around 5 that is not matched in our posterior predictive distribution. On the left-most plot, we plot these zip codes that roughly correspond to this model: it doesn't seem like there is a clear spatial component (which rules out factors like state-level differences). In an attempt to account for this mode and to improve our overall model performance, we instead fit models that include other covariates, including education covariates (proportion of adult population with a college degree or higher) and election covariates (including $\indi[\text{Senate election in 2022}] - \indi[\text{Senate election in 2020}]$). Additionally, rather than trying to predict the difference, we reframe our problem by using (log) contributions in 2020 as a covariate, rather than as part of our outcome.
+
+We also attempt to fit our model to more observations: this time, we include 2000 data points sampled at random from the Eastern United States in our training set. One challenge, however, is that the model as written is now computationally intractable (at least locally on our machines, in the allotted time). Therefore, we considered two potential routes. At first, we considered the bootstrap method from Byers and Gill: however, we believe that the bootstrap method samples points that are very far away from one another, which leads to poor estimation of the relatively local effects. Therefore, we turned to the Vecchia approximation, which roughly approximates the likelihood of a Gaussian process by the product of likelihoods in local neighborhood (for this reason, it is also commonly referred to as a \textit{nearest neighbors Gaussian process method}). 
+
+Here, we find much more success. Our trace plots and posterior draws are depicted in the figure below.
+Our model is fit relatively efficiently (running in a little over three hours), and the trace plots seem to suggest convergence.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{../nngp_trace.pdf}
+\end{figure}
+
+
 
 \newpage
 \textbf{AI disclosure.} We used ChatGPT to help us...
