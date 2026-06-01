@@ -69,6 +69,17 @@ DEFAULT_COVARIATES = (
     "log_population",
 )
 
+# Covariate list used for the full-US model (state FEs added separately).
+# election_2020 and election_2022 are separate flags rather than their difference,
+# allowing independent effects for each cycle.
+FULL_US_COVARIATES = (
+    "prop_college_degree_or_higher_18plus",
+    "election_diff",
+    "log_contrib_2020",
+    "log_income",
+    "log_population",
+)
+
 
 @dataclass
 class ModelData:
@@ -83,6 +94,7 @@ class ModelData:
     covariates: tuple[str, ...]
     x_means: np.ndarray
     x_sds: np.ndarray
+    state_names: list[str] | None = None  # None when no state FEs
 
 
 def train_test_split(df: pd.DataFrame, frac: float = 0.8, seed: int = 305):
@@ -110,8 +122,12 @@ def prepare_arrays(
     covariates: tuple[str, ...] = DEFAULT_COVARIATES,
     sample_n: int | None = None,
     seed: int = 305,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    state_fixed_effects: bool = False,
+    state_col: str = "state",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str] | None]:
     required = ["log_contrib_2022", "lat", "lon", *covariates]
+    if state_fixed_effects:
+        required = required + [state_col]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
@@ -126,13 +142,26 @@ def prepare_arrays(
     x_sds[x_sds == 0] = 1.0
 
     x_scaled = (x_raw - x_means) / x_sds
-    X = np.column_stack([np.ones(len(data)), x_scaled]).astype("float64")
+
+    state_dummies = None
+    state_names: list[str] | None = None
+    if state_fixed_effects:
+        # drop-one encoding; sorted so reference state is alphabetically first
+        dummies = pd.get_dummies(data[state_col], drop_first=True, dtype=float)
+        state_names = list(dummies.columns)
+        state_dummies = dummies.to_numpy()
+
+    parts = [np.ones((len(data), 1)), x_scaled]
+    if state_dummies is not None:
+        parts.append(state_dummies)
+    X = np.hstack(parts).astype("float64")
+
     y = data["log_contrib_2022"].astype(float).to_numpy()
     coords_km = lonlat_to_km(
         data["lon"].astype(float).to_numpy(),
         data["lat"].astype(float).to_numpy(),
     ).astype("float64")
-    return X, y, coords_km, x_means, x_sds
+    return X, y, coords_km, x_means, x_sds, state_names
 
 
 def spatial_order(coords_km: np.ndarray) -> np.ndarray:
@@ -177,12 +206,16 @@ def build_model_data(
     sample_n: int | None = None,
     m: int = 20,
     seed: int = 305,
+    state_fixed_effects: bool = False,
+    state_col: str = "state",
 ) -> ModelData:
-    X, y, coords_km, x_means, x_sds = prepare_arrays(
+    X, y, coords_km, x_means, x_sds, state_names = prepare_arrays(
         df=df,
         covariates=covariates,
         sample_n=sample_n,
         seed=seed,
+        state_fixed_effects=state_fixed_effects,
+        state_col=state_col,
     )
     order, neighbor_idx, neighbor_mask, d_iN, d_NN = make_padded_vecchia_neighbors(coords_km, m=m)
 
@@ -198,14 +231,14 @@ def build_model_data(
         covariates=tuple(covariates),
         x_means=x_means,
         x_sds=x_sds,
+        state_names=state_names,
     )
 
 
 def save_model_data(path: str | Path, data: ModelData) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        path,
+    kwargs: dict = dict(
         X=data.X,
         y=data.y,
         coords_km=data.coords_km,
@@ -218,10 +251,14 @@ def save_model_data(path: str | Path, data: ModelData) -> None:
         x_means=data.x_means,
         x_sds=data.x_sds,
     )
+    if data.state_names is not None:
+        kwargs["state_names"] = np.array(data.state_names, dtype=object)
+    np.savez_compressed(path, **kwargs)
 
 
 def load_model_data(path: str | Path) -> ModelData:
     z = np.load(path, allow_pickle=True)
+    state_names = list(z["state_names"].tolist()) if "state_names" in z else None
     return ModelData(
         X=z["X"],
         y=z["y"],
@@ -234,6 +271,7 @@ def load_model_data(path: str | Path) -> ModelData:
         covariates=tuple(z["covariates"].tolist()),
         x_means=z["x_means"],
         x_sds=z["x_sds"],
+        state_names=state_names,
     )
 
 
@@ -306,6 +344,7 @@ def vecchia_loglik_scan(
 def fit_model(
     data: ModelData,
     *,
+    spatial: bool = True,
     kernel: str = "matern32",
     draws: int = 1000,
     tune: int = 1000,
@@ -313,43 +352,75 @@ def fit_model(
     cores: int = 1,
     target_accept: float = 0.9,
     beta_sigma: float = 5.0,
-    log_sigma2_sigma: float = 5.0,
-    nugget_ratio_bounds: tuple[float, float] = (1.0, 100.0),
-    inv_phi_bounds: tuple[float, float] = (1.0, 2000.0),
+    # Tighter prior for state dummies: they are raw 0/1 (not standardized) so the
+    # same wide prior as continuous covariates would allow implausibly large state shifts.
+    state_beta_sigma: float = 2.0,
+    log_sigma2_mu: float = -0.2,
+    log_sigma2_sigma: float = 1.0,
+    # nugget_ratio ~ HalfNormal(nugget_ratio_sigma): prior median ~0.67*sigma, reflects
+    # ~65-70% nugget fraction seen in empirical semivariogram (nugget ~2, sill ~0.8-1.2)
+    nugget_ratio_sigma: float = 5.0,
+    # inv_phi ~ Uniform(inv_phi_lo, inv_phi_hi) in km: semivariogram shows rapid rise
+    # under 300 km and plateau by ~500 km, so we restrict range to 10-500 km
+    inv_phi_lo: float = 10.0,
+    inv_phi_hi: float = 500.0,
     jitter: float = 1e-6,
     seed: int = 305,
 ):
+    # Columns: [intercept, cov_1, ..., cov_k, state_1, ..., state_s]
+    n_continuous = 1 + len(data.covariates)  # intercept + standardized covariates
+    n_states = data.X.shape[1] - n_continuous  # 0 when no state FEs
+
     with pm.Model() as model:
-        beta = pm.Normal("beta", mu=0.0, sigma=beta_sigma, shape=data.X.shape[1])
+        if n_states > 0:
+            beta_cont  = pm.Normal("beta_cont",  mu=0.0, sigma=beta_sigma,       shape=n_continuous)
+            beta_state = pm.Normal("beta_state", mu=0.0, sigma=state_beta_sigma, shape=n_states)
+            beta = pm.Deterministic("beta", pt.concatenate([beta_cont, beta_state]))
+        else:
+            beta = pm.Normal("beta", mu=0.0, sigma=beta_sigma, shape=data.X.shape[1])
 
-        log_sigma2 = pm.Normal("log_sigma2", mu=0.0, sigma=log_sigma2_sigma)
-        sigma2 = pm.Deterministic("sigma2", pt.exp(log_sigma2))
+        if spatial:
+            # sigma2: partial sill. Log-normal with median ~0.8, consistent with
+            # semivariogram sill ~3.25 and nugget ~2.0-2.25 leaving ~0.8-1.2 spatial.
+            log_sigma2 = pm.Normal("log_sigma2", mu=log_sigma2_mu, sigma=log_sigma2_sigma)
+            sigma2 = pm.Deterministic("sigma2", pt.exp(log_sigma2))
 
-        nugget_ratio = pm.Uniform(
-            "nugget_ratio",
-            lower=nugget_ratio_bounds[0],
-            upper=nugget_ratio_bounds[1],
-        )
-        tau2 = pm.Deterministic("tau2", nugget_ratio * sigma2)
+            # nugget_ratio = tau2/sigma2. HalfNormal allows <1 (state FEs absorb regional
+            # variation) while still concentrating mass at moderate values.
+            nugget_ratio = pm.HalfNormal("nugget_ratio", sigma=nugget_ratio_sigma)
+            tau2 = pm.Deterministic("tau2", nugget_ratio * sigma2)
 
-        inv_phi = pm.Uniform("inv_phi", lower=inv_phi_bounds[0], upper=inv_phi_bounds[1])
-        phi = pm.Deterministic("phi", 1.0 / inv_phi)
+            # inv_phi: range in km. Uniform over [10, 500] km based on semivariogram
+            # showing correlation structure at local-to-regional scales only.
+            inv_phi = pm.Uniform("inv_phi", lower=inv_phi_lo, upper=inv_phi_hi)
+            phi = pm.Deterministic("phi", 1.0 / inv_phi)
 
-        loglik = vecchia_loglik_scan(
-            y=data.y,
-            X=data.X,
-            neighbor_idx=data.neighbor_idx,
-            neighbor_mask=data.neighbor_mask,
-            d_iN=data.d_iN,
-            d_NN=data.d_NN,
-            beta=beta,
-            sigma2=sigma2,
-            tau2=tau2,
-            phi=phi,
-            kernel=kernel,
-            jitter=jitter,
-        )
-        pm.Potential("vecchia_loglik", loglik)
+            loglik = vecchia_loglik_scan(
+                y=data.y,
+                X=data.X,
+                neighbor_idx=data.neighbor_idx,
+                neighbor_mask=data.neighbor_mask,
+                d_iN=data.d_iN,
+                d_NN=data.d_NN,
+                beta=beta,
+                sigma2=sigma2,
+                tau2=tau2,
+                phi=phi,
+                kernel=kernel,
+                jitter=jitter,
+            )
+            pm.Potential("vecchia_loglik", loglik)
+        else:
+            # Bayesian linear model: y ~ N(X beta, tau2 I)
+            log_tau2 = pm.Normal("log_tau2", mu=0.0, sigma=log_sigma2_sigma)
+            tau2 = pm.Deterministic("tau2", pt.exp(log_tau2))
+            mu = pt.dot(pt.as_tensor_variable(data.X.astype("float64")), beta)
+            pm.Normal(
+                "y_obs",
+                mu=mu,
+                sigma=pt.sqrt(tau2 + jitter),
+                observed=data.y.astype("float64"),
+            )
 
         idata = pm.sample(
             draws=draws,
@@ -361,10 +432,13 @@ def fit_model(
             return_inferencedata=True,
         )
 
-    idata.attrs["kernel"] = kernel
+    idata.attrs["kernel"] = kernel if spatial else "none"
+    idata.attrs["spatial"] = int(spatial)
     idata.attrs["m_neighbors"] = int(data.neighbor_idx.shape[1])
     idata.attrs["n_observations"] = int(data.y.shape[0])
     idata.attrs["covariates"] = ",".join(data.covariates)
+    if data.state_names is not None:
+        idata.attrs["state_names"] = ",".join(data.state_names)
     return idata
 
 
@@ -466,6 +540,7 @@ def fit_command(args) -> None:
     df = pd.read_csv(args.input)
     train, _ = train_test_split(df, frac=args.train_frac, seed=args.seed)
     covariates = tuple(args.covariates.split(",")) if args.covariates else DEFAULT_COVARIATES
+    spatial = not args.no_spatial
 
     data = build_model_data(
         train,
@@ -473,10 +548,13 @@ def fit_command(args) -> None:
         sample_n=args.sample_n,
         m=args.m,
         seed=args.seed,
+        state_fixed_effects=args.state_fixed_effects,
+        state_col=args.state_col,
     )
 
     idata = fit_model(
         data,
+        spatial=spatial,
         kernel=args.kernel,
         draws=args.draws,
         tune=args.tune,
@@ -484,8 +562,12 @@ def fit_command(args) -> None:
         cores=args.cores,
         target_accept=args.target_accept,
         beta_sigma=args.beta_sigma,
-        nugget_ratio_bounds=(args.nugget_ratio_min, args.nugget_ratio_max),
-        inv_phi_bounds=(args.inv_phi_min, args.inv_phi_max),
+        state_beta_sigma=args.state_beta_sigma,
+        log_sigma2_mu=args.log_sigma2_mu,
+        log_sigma2_sigma=args.log_sigma2_sigma,
+        nugget_ratio_sigma=args.nugget_ratio_sigma,
+        inv_phi_lo=args.inv_phi_lo,
+        inv_phi_hi=args.inv_phi_hi,
         jitter=args.jitter,
         seed=args.seed,
     )
@@ -544,6 +626,18 @@ def make_parser() -> argparse.ArgumentParser:
     fit.add_argument("--train-frac", type=float, default=0.8)
     fit.add_argument("--m", type=int, default=20)
     fit.add_argument("--kernel", choices=["matern32", "expquad"], default="matern32")
+    fit.add_argument("--no-spatial", action="store_true", default=False,
+                     help="Fit Bayesian linear model without spatial GP term")
+    fit.add_argument("--state-fixed-effects", action="store_true", default=False,
+                     help="Include state fixed effects (drop-one encoding) in the design matrix")
+    fit.add_argument("--state-col", default="state",
+                     help="Column name for state identifier (default: 'state')")
+    fit.add_argument("--state-beta-sigma", type=float, default=2.0)
+    fit.add_argument("--log-sigma2-mu", type=float, default=-0.2)
+    fit.add_argument("--log-sigma2-sigma", type=float, default=1.0)
+    fit.add_argument("--nugget-ratio-sigma", type=float, default=5.0)
+    fit.add_argument("--inv-phi-lo", type=float, default=10.0)
+    fit.add_argument("--inv-phi-hi", type=float, default=500.0)
     fit.add_argument("--draws", type=int, default=1000)
     fit.add_argument("--tune", type=int, default=1000)
     fit.add_argument("--chains", type=int, default=4)
